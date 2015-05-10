@@ -494,24 +494,34 @@ public class HttpConnection implements Connection {
         }
 
         static Response execute(Connection.Request req, Response previousResponse) throws IOException {
+           return execute(req, previousResponse, null);
+        }
+
+        static Response execute(Connection.Request req, Response previousResponse, String requestBody) throws IOException {
             Validate.notNull(req, "Request must not be null");
             String protocol = req.url().getProtocol();
-            if (!protocol.equals("http") && !protocol.equals("https"))
+            if (!protocol.equals("http") && !protocol.equals("https")) {
                 throw new MalformedURLException("Only http & https protocols supported");
+            }
 
             // set up the request for execution
             String mimeBoundary = null;
             if (!req.method().hasBody() && req.data().size() > 0) {
                 serialiseRequestUrl(req); // appends query string
-            } else if (req.method().hasBody()) {
+            } else if (req.method().hasBody()&&!req.headers().containsKey("Content-Type")) {
                 mimeBoundary = setOutputContentType(req);
             }
             HttpURLConnection conn = createConnection(req);
             Response res;
             try {
                 conn.connect();
-                if (conn.getDoOutput())
-                    writePost(req, conn.getOutputStream(), mimeBoundary);
+                if (conn.getDoOutput()) {
+                    if(requestBody==null){
+                        writePost(req, conn.getOutputStream(), mimeBoundary);
+                    }else{
+                        writeStringPost(requestBody, conn.getOutputStream());
+                    }
+                }
 
                 int status = conn.getResponseCode();
                 res = new Response(previousResponse);
@@ -525,7 +535,9 @@ public class HttpConnection implements Connection {
 
                     String location = res.header(LOCATION);
                     if (location != null && location.startsWith("http:/") && location.charAt(6) != '/') // fix broken Location: http:/temp/AAG_New/en/index.php
+                    {
                         location = location.substring(6);
+                    }
                     req.url(new URL(req.url(), encodeUrl(location)));
 
                     for (Map.Entry<String, String> cookie : res.cookies.entrySet()) { // add response cookies to request (for e.g. login posts)
@@ -533,8 +545,9 @@ public class HttpConnection implements Connection {
                     }
                     return execute(req, res);
                 }
-                if ((status < 200 || status >= 400) && !req.ignoreHttpErrors())
-                        throw new HttpStatusException("HTTP error fetching URL", status, req.url().toString());
+                if ((status < 200 || status >= 400) && !req.ignoreHttpErrors()) {
+                    throw new HttpStatusException("HTTP error fetching URL", status, req.url().toString());
+                }
 
                 // check that we can handle the returned content type; if not, abort before fetching it
                 String contentType = res.contentType();
@@ -542,10 +555,10 @@ public class HttpConnection implements Connection {
                         && !req.ignoreContentType()
                         && !contentType.startsWith("text/")
                         && !contentType.startsWith("application/xml")
-                        && !xmlContentTypeRxp.matcher(contentType).matches()
-                        )
+                        && !xmlContentTypeRxp.matcher(contentType).matches()) {
                     throw new UnsupportedMimeTypeException("Unhandled content type. Must be text/*, application/xml, or application/xhtml+xml",
                             contentType, req.url().toString());
+                }
 
                 res.charset = DataUtil.getCharsetFromContentType(res.contentType); // may be null, readInputStream deals with it
                 if (conn.getContentLength() != 0) { // -1 means unknown, chunked. sun throws an IO exception on 500 response with no content when trying to read body
@@ -553,14 +566,18 @@ public class HttpConnection implements Connection {
                     InputStream dataStream = null;
                     try {
                         dataStream = conn.getErrorStream() != null ? conn.getErrorStream() : conn.getInputStream();
-                        bodyStream = res.hasHeaderWithValue(CONTENT_ENCODING, "gzip") ?
-                                new BufferedInputStream(new GZIPInputStream(dataStream)) :
-                                new BufferedInputStream(dataStream);
+                        bodyStream = res.hasHeaderWithValue(CONTENT_ENCODING, "gzip")
+                                ? new BufferedInputStream(new GZIPInputStream(dataStream))
+                                : new BufferedInputStream(dataStream);
 
                         res.byteData = DataUtil.readToByteBuffer(bodyStream, req.maxBodySize());
                     } finally {
-                        if (bodyStream != null) bodyStream.close();
-                        if (dataStream != null) dataStream.close();
+                        if (bodyStream != null) {
+                            bodyStream.close();
+                        }
+                        if (dataStream != null) {
+                            dataStream.close();
+                        }
                     }
                 } else {
                     res.byteData = DataUtil.emptyByteBuffer();
@@ -574,6 +591,7 @@ public class HttpConnection implements Connection {
             res.executed = true;
             return res;
         }
+
 
         public int statusCode() {
             return statusCode;
@@ -807,6 +825,12 @@ public class HttpConnection implements Connection {
                     w.write(URLEncoder.encode(keyVal.value(), req.postDataCharset()));
                 }
             }
+            w.close();
+        }
+        
+         private static void writeStringPost(String data, OutputStream outputStream) throws IOException {
+            OutputStreamWriter w = new OutputStreamWriter(outputStream, DataUtil.defaultCharset);
+            w.write(data.toCharArray());
             w.close();
         }
 
