@@ -1,6 +1,7 @@
 package org.jsoup;
 
 import org.jsoup.nodes.Document;
+import org.jsoup.parser.HtmlTreeBuilder;
 import org.jsoup.parser.Parser;
 
 import java.io.IOException;
@@ -140,7 +141,14 @@ public interface Connection {
      * @return this Connection, for chaining
      */
     Connection validateTLSCertificates(boolean value);
-
+   
+    /**
+     * Set user defined request body data.
+     * @param requestBody user defined request body
+     * @return this Connection, for chaining
+     */
+    Connection setRequestBody(String requestBody);
+    
     /**
      * Add a request data parameter. Request parameters are sent in the request query string for GETs, and in the
      * request body for POSTs. A request may have multiple values of the same name.
@@ -149,7 +157,7 @@ public interface Connection {
      * @return this Connection, for chaining
      */
     Connection data(String key, String value);
-
+    
     /**
      * Add an input stream as a request data paramater. For GETs, has no effect, but for POSTS this will upload the
      * input stream.
@@ -210,7 +218,8 @@ public interface Connection {
     Connection cookies(Map<String, String> cookies);
 
     /**
-     * Provide an alternate parser to use when parsing the response to a Document.
+     * Provide an alternate parser to use when parsing the response to a Document. If not set, defaults to the HTML
+     * parser, unless the response content-type is XML, in which case the XML parser is used.
      * @param parser alternate parser
      * @return this Connection, for chaining
      */
@@ -467,7 +476,7 @@ public interface Connection {
          * be thrown.
          */
         boolean ignoreContentType();
-
+        
         /**
          * Configures the request to ignore the Content-Type of the response.
          * @param ignoreContentType set to true to ignore the content type.
@@ -486,7 +495,18 @@ public interface Connection {
          * @param value set false to ignore TLS (SSL) certificates
          */
         void validateTLSCertificates(boolean value);
-
+        
+        /**
+         * Get user defined request body data.
+         * @return user defined request body .
+         */
+        String getRequestBody() ;
+        
+        /**
+         * Set user defined request body data.
+         * @param requestBody  user defined request body 
+         */
+        void setRequestBody(String requestBody) ;
         /**
          * Add a data parameter to the request
          * @param keyval data to add.

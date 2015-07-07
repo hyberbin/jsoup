@@ -127,6 +127,11 @@ public class HttpConnection implements Connection {
         return this;
     }
 
+    public Connection setRequestBody(String requestBody){
+        req.setRequestBody(requestBody);
+        return this;
+    }
+    
     public Connection data(String key, String value) {
         req.data(KeyVal.create(key, value));
         return this;
@@ -357,8 +362,10 @@ public class HttpConnection implements Connection {
         private boolean ignoreHttpErrors = false;
         private boolean ignoreContentType = false;
         private Parser parser;
+        private boolean parserDefined = false; // called parser(...) vs initialized in ctor
         private boolean validateTSLCertificates = true;
         private String postDataCharset = DataUtil.defaultCharset;
+        private String requestBody;
 
         private Request() {
             timeoutMilliseconds = 3000;
@@ -402,6 +409,10 @@ public class HttpConnection implements Connection {
         public boolean ignoreHttpErrors() {
             return ignoreHttpErrors;
         }
+        
+        public boolean hasRequestBody() {
+            return requestBody!=null;
+        }
 
         public boolean validateTLSCertificates() {
             return validateTSLCertificates;
@@ -425,6 +436,14 @@ public class HttpConnection implements Connection {
             return this;
         }
 
+        public String getRequestBody() {
+            return requestBody;
+        }
+
+        public void setRequestBody(String requestBody) {
+            this.requestBody = requestBody;
+        }
+
         public Request data(Connection.KeyVal keyval) {
             Validate.notNull(keyval, "Key val must not be null");
             data.add(keyval);
@@ -437,6 +456,7 @@ public class HttpConnection implements Connection {
 
         public Request parser(Parser parser) {
             this.parser = parser;
+            parserDefined = true;
             return this;
         }
 
@@ -470,11 +490,9 @@ public class HttpConnection implements Connection {
         private Connection.Request req;
 
         /*
-         * For example {@code application/atom+xml;charset=utf-8}.
-         * Stepping through it: start with {@code "application/"}, follow with word
-         * characters up to a {@code "+xml"}, and then maybe more ({@code .*}).
+         * Matches XML content types (like text/xml, application/xhtml+xml;charset=UTF8, etc)
          */
-        private static final Pattern xmlContentTypeRxp = Pattern.compile("application/\\w+\\+xml.*");
+        private static final Pattern xmlContentTypeRxp = Pattern.compile("(application|text)/\\w*\\+?xml.*");
 
         Response() {
             super();
@@ -503,16 +521,21 @@ public class HttpConnection implements Connection {
             String mimeBoundary = null;
             if (!req.method().hasBody() && req.data().size() > 0) {
                 serialiseRequestUrl(req); // appends query string
-            } else if (req.method().hasBody()) {
+            } else if (req.method().hasBody()&&!req.headers().containsKey("Content-Type")) {
                 mimeBoundary = setOutputContentType(req);
             }
             HttpURLConnection conn = createConnection(req);
             Response res;
             try {
                 conn.connect();
-                if (conn.getDoOutput())
-                    writePost(req, conn.getOutputStream(), mimeBoundary);
-
+                if (conn.getDoOutput()){
+                    if(req.getRequestBody()!=null){
+                       writeStringPost(req.getRequestBody(), conn.getOutputStream());
+                    }else{
+                       writePost(req, conn.getOutputStream(), mimeBoundary); 
+                    }
+                }
+                    
                 int status = conn.getResponseCode();
                 res = new Response(previousResponse);
                 res.setupFromConnection(conn, previousResponse);
@@ -541,11 +564,18 @@ public class HttpConnection implements Connection {
                 if (contentType != null
                         && !req.ignoreContentType()
                         && !contentType.startsWith("text/")
-                        && !contentType.startsWith("application/xml")
                         && !xmlContentTypeRxp.matcher(contentType).matches()
                         )
                     throw new UnsupportedMimeTypeException("Unhandled content type. Must be text/*, application/xml, or application/xhtml+xml",
                             contentType, req.url().toString());
+
+                // switch to the XML parser if content type is xml and not parser not explicitly set
+                if (contentType != null && xmlContentTypeRxp.matcher(contentType).matches()) {
+                    // only flip it if a HttpConnection.Request (i.e. don't presume other impls want it):
+                    if (req instanceof HttpConnection.Request && !((Request) req).parserDefined) {
+                        req.parser(Parser.xmlParser());
+                    }
+                }
 
                 res.charset = DataUtil.getCharsetFromContentType(res.contentType); // may be null, readInputStream deals with it
                 if (conn.getContentLength() != 0) { // -1 means unknown, chunked. sun throws an IO exception on 500 response with no content when trying to read body
@@ -763,7 +793,12 @@ public class HttpConnection implements Connection {
             }
             return bound;
         }
-
+        private static void writeStringPost(String data, OutputStream outputStream) throws IOException {
+            OutputStreamWriter w = new OutputStreamWriter(outputStream, DataUtil.defaultCharset);
+            w.write(data.toCharArray());
+            w.close();
+        }
+         
         private static void writePost(final Connection.Request req, final OutputStream outputStream, final String bound) throws IOException {
             final Collection<Connection.KeyVal> data = req.data();
             final BufferedWriter w = new BufferedWriter(new OutputStreamWriter(outputStream, DataUtil.defaultCharset));

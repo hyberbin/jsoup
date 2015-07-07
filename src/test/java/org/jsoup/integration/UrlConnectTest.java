@@ -4,9 +4,13 @@ import org.jsoup.Connection;
 import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
 import org.jsoup.UnsupportedMimeTypeException;
+import org.jsoup.helper.StringUtil;
 import org.jsoup.helper.W3CDom;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.FormElement;
+import org.jsoup.parser.HtmlTreeBuilder;
+import org.jsoup.parser.Parser;
+import org.jsoup.parser.XmlTreeBuilder;
 import org.junit.Ignore;
 import org.junit.Test;
 
@@ -173,9 +177,17 @@ public class UrlConnectTest {
 
     @Test
     public void followsRelativeRedirect() throws IOException {
-        Connection con = Jsoup.connect("http://direct.infohound.net/tools/302-rel.pl"); // to ./ - /tools/
+        Connection con = Jsoup.connect("http://direct.infohound.net/tools/302-rel.pl"); // to /tidy/
         Document doc = con.post();
         assertTrue(doc.title().contains("HTML Tidy Online"));
+    }
+
+    @Test
+    public void followsRelativeDotRedirect() throws IOException {
+        // redirects to "./ok.html", should resolve to http://direct.infohound.net/tools/ok.html
+        Connection con = Jsoup.connect("http://direct.infohound.net/tools/302-rel-dot.pl"); // to ./ok.html
+        Document doc = con.post();
+        assertTrue(doc.title().contains("OK"));
     }
 
     @Test
@@ -494,4 +506,36 @@ public class UrlConnectTest {
         assertTrue(html.contains("jsoup"));
     }
 
+    @Test
+    public void fetchHandlesXml() throws IOException {
+        // should auto-detect xml and use XML parser, unless explicitly requested the html parser
+        String xmlUrl = "http://direct.infohound.net/tools/parse-xml.xml";
+        Connection con = Jsoup.connect(xmlUrl);
+        Document doc = con.get();
+        Connection.Request req = con.request();
+        assertTrue(req.parser().getTreeBuilder() instanceof XmlTreeBuilder);
+        assertEquals("<xml> <link> one </link> <table> Two </table> </xml>", StringUtil.normaliseWhitespace(doc.outerHtml()));
+    }
+
+    @Test
+    public void fetchHandlesXmlAsHtmlWhenParserSet() throws IOException {
+        // should auto-detect xml and use XML parser, unless explicitly requested the html parser
+        String xmlUrl = "http://direct.infohound.net/tools/parse-xml.xml";
+        Connection con = Jsoup.connect(xmlUrl).parser(Parser.htmlParser());
+        Document doc = con.get();
+        Connection.Request req = con.request();
+        assertTrue(req.parser().getTreeBuilder() instanceof HtmlTreeBuilder);
+        assertEquals("<html> <head></head> <body> <xml> <link>one <table> Two </table> </xml> </body> </html>", StringUtil.normaliseWhitespace(doc.outerHtml()));
+    }
+    
+    @Test
+    public  void postRequestBody() throws IOException{
+        String url="http://codebeast.me/hyb-test.php";
+        Connection con=Jsoup.connect(url);
+        con.method(Connection.Method.POST);
+        con.setRequestBody("{\"userName\":\"zhangsan\",\"age\":8}");
+        Connection.Response execute = con.execute();
+        String body = execute.body();
+        assertEquals("{\"userName\":\"zhangsan\",\"age\":8}",body);
+    }
 }
